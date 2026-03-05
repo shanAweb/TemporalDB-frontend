@@ -1,10 +1,29 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { healthCheck } from "@/lib/api";
+
 interface TopbarProps {
   sidebarCollapsed: boolean;
 }
 
 export default function Topbar({ sidebarCollapsed }: TopbarProps) {
+  const [apiStatus, setApiStatus] = useState<"checking" | "connected" | "disconnected">("checking");
+
+  useEffect(() => {
+    let mounted = true;
+
+    const check = () => {
+      healthCheck()
+        .then(() => { if (mounted) setApiStatus("connected"); })
+        .catch(() => { if (mounted) setApiStatus("disconnected"); });
+    };
+
+    check();
+    const interval = setInterval(check, 30000);
+    return () => { mounted = false; clearInterval(interval); };
+  }, []);
+
   return (
     <header
       className="fixed top-0 right-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/70 backdrop-blur-xl px-6 transition-all duration-250"
@@ -39,10 +58,20 @@ export default function Topbar({ sidebarCollapsed }: TopbarProps) {
         {/* Status indicator */}
         <div className="flex items-center gap-2 rounded-lg border border-border bg-surface/60 px-3 py-1.5">
           <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-green-400" />
+            {apiStatus === "connected" && (
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+            )}
+            <span className={`relative inline-flex h-2 w-2 rounded-full ${
+              apiStatus === "connected" ? "bg-green-400" :
+              apiStatus === "disconnected" ? "bg-red-400" :
+              "bg-yellow-400"
+            }`} />
           </span>
-          <span className="text-xs font-medium text-text-secondary">API Connected</span>
+          <span className="text-xs font-medium text-text-secondary">
+            {apiStatus === "connected" ? "API Connected" :
+             apiStatus === "disconnected" ? "API Disconnected" :
+             "Checking..."}
+          </span>
         </div>
 
         {/* Notifications */}

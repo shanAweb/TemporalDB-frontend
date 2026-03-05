@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { apiFetch } from "@/lib/api";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -53,56 +54,6 @@ const suggestedQueries = [
   { text: "What if the trade regulations hadn't been enacted?", intent: "COUNTERFACTUAL" as IntentType },
 ];
 
-const mockResults: QueryResult[] = [
-  {
-    id: "qr-001",
-    query: "Why did revenue drop in Q3?",
-    intent: "CAUSAL_WHY",
-    intentConfidence: 0.94,
-    answer:
-      "Revenue declined 15% in Q3 primarily due to a cascade of supply chain disruptions across the Asia-Pacific region beginning in July 2024. New semiconductor import regulations enacted in September further constrained production capacity, which was reduced by 20% at primary facilities. The causal chain shows: trade regulations → supply chain disruption → production cuts → revenue decline.",
-    events: [
-      {
-        id: "evt-001",
-        description: "Supply chain disruptions reported across Asia-Pacific region",
-        entity: "Asia-Pacific Supply Chain",
-        timestamp: "Oct 15, 2024",
-        confidence: 0.95,
-        type: "state_change",
-      },
-      {
-        id: "evt-002",
-        description: "Q3 revenue declined 15% year-over-year for manufacturing sector",
-        entity: "Manufacturing Sector",
-        timestamp: "Oct 1, 2024",
-        confidence: 0.92,
-        type: "action",
-      },
-      {
-        id: "evt-003",
-        description: "New trade regulations enacted affecting semiconductor imports",
-        entity: "Trade Policy",
-        timestamp: "Sep 20, 2024",
-        confidence: 0.88,
-        type: "state_change",
-      },
-      {
-        id: "evt-004",
-        description: "Production capacity reduced by 20% at primary facilities",
-        entity: "Production Operations",
-        timestamp: "Sep 15, 2024",
-        confidence: 0.91,
-        type: "action",
-      },
-    ],
-    sources: [
-      { name: "Q3_Financial_Report.pdf", relevance: 0.96 },
-      { name: "supply_chain_analysis.docx", relevance: 0.89 },
-      { name: "trade_regulations_update.md", relevance: 0.82 },
-    ],
-    timestamp: "Just now",
-  },
-];
 
 function intentColor(intent: IntentType): string {
   switch (intent) {
@@ -184,25 +135,71 @@ export default function QueryPage() {
   }, [input]);
 
   const handleSubmit = useCallback(
-    (query?: string) => {
+    async (query?: string) => {
       const q = query ?? input.trim();
       if (!q || isLoading) return;
 
       setInput("");
       setIsLoading(true);
 
-      // Simulate API call
-      setTimeout(() => {
-        const mockResult: QueryResult = {
-          ...mockResults[0],
+      try {
+        const data = await apiFetch<{
+          answer: string;
+          confidence: number;
+          intent?: string;
+          causal_chain?: Array<{
+            id: string;
+            description: string;
+            ts_start: string;
+            confidence: number;
+            entity?: string;
+            event_type?: string;
+          }>;
+          sources?: Array<{ source: string; metadata?: { filename?: string }; relevance?: number }>;
+        }>("/query", {
+          method: "POST",
+          body: { question: q },
+        });
+
+        const result: QueryResult = {
           id: crypto.randomUUID(),
           query: q,
+          intent: (data.intent as IntentType) || "GENERAL",
+          intentConfidence: data.confidence || 0.8,
+          answer: data.answer,
+          events: (data.causal_chain || []).map((e) => ({
+            id: e.id,
+            description: e.description,
+            entity: e.entity || "Unknown",
+            timestamp: e.ts_start ? new Date(e.ts_start).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "",
+            confidence: e.confidence,
+            type: e.event_type || "event",
+          })),
+          sources: (data.sources || []).map((s) => ({
+            name: s.metadata?.filename || s.source,
+            relevance: s.relevance || 0.8,
+          })),
           timestamp: "Just now",
         };
-        setResults((prev) => [mockResult, ...prev]);
-        setExpandedResult(mockResult.id);
+
+        setResults((prev) => [result, ...prev]);
+        setExpandedResult(result.id);
+      } catch (err) {
+        const errorResult: QueryResult = {
+          id: crypto.randomUUID(),
+          query: q,
+          intent: "GENERAL",
+          intentConfidence: 0,
+          answer: err instanceof Error ? err.message : "Failed to process query. Make sure the backend is running and documents have been ingested.",
+          events: [],
+          sources: [],
+          timestamp: "Just now",
+        };
+        setResults((prev) => [errorResult, ...prev]);
+        setExpandedResult(errorResult.id);
+      } finally {
         setIsLoading(false);
-      }, 1500);
+      }
     },
     [input, isLoading]
   );

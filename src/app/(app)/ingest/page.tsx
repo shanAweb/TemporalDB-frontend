@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { apiUpload } from "@/lib/api";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -31,48 +32,6 @@ interface QueuedFile {
   error?: string;
 }
 
-const recentIngestions = [
-  {
-    id: "doc-001",
-    name: "Q3_Financial_Report.pdf",
-    type: "PDF",
-    size: "2.4 MB",
-    timestamp: "2 hours ago",
-    events: 47,
-    entities: 23,
-    status: "completed" as const,
-  },
-  {
-    id: "doc-002",
-    name: "supply_chain_analysis.docx",
-    type: "DOCX",
-    size: "1.1 MB",
-    timestamp: "5 hours ago",
-    events: 31,
-    entities: 18,
-    status: "completed" as const,
-  },
-  {
-    id: "doc-003",
-    name: "trade_regulations_update.md",
-    type: "Markdown",
-    size: "48 KB",
-    timestamp: "1 day ago",
-    events: 12,
-    entities: 9,
-    status: "completed" as const,
-  },
-  {
-    id: "doc-004",
-    name: "meeting_notes_oct.txt",
-    type: "TXT",
-    size: "15 KB",
-    timestamp: "1 day ago",
-    events: 8,
-    entities: 5,
-    status: "completed" as const,
-  },
-];
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + " B";
@@ -174,39 +133,50 @@ export default function IngestPage() {
     [addFiles]
   );
 
-  const simulateUpload = useCallback(() => {
-    setQueue((prev) =>
-      prev.map((f) =>
-        f.status === "pending" ? { ...f, status: "uploading" as FileStatus, progress: 0 } : f
-      )
-    );
+  const uploadFiles = useCallback(() => {
+    const pendingFiles = queue.filter((f) => f.status === "pending");
 
-    // Simulate progress for demo purposes
-    const interval = setInterval(() => {
-      setQueue((prev) => {
-        let allDone = true;
-        const updated = prev.map((f) => {
-          if (f.status === "uploading") {
-            const next = Math.min(f.progress + Math.random() * 25, 100);
-            if (next >= 100) {
-              return { ...f, status: "processing" as FileStatus, progress: 100 };
-            }
-            allDone = false;
-            return { ...f, progress: next };
-          }
-          if (f.status === "processing") {
-            // Simulate processing completing after a tick
-            return { ...f, status: "done" as FileStatus, progress: 100 };
-          }
-          return f;
-        });
-        if (allDone && updated.every((f) => f.status === "done" || f.status === "error" || f.status === "pending")) {
-          clearInterval(interval);
-        }
-        return updated;
-      });
-    }, 600);
-  }, []);
+    pendingFiles.forEach(async (item) => {
+      setQueue((prev) =>
+        prev.map((f) =>
+          f.id === item.id ? { ...f, status: "uploading" as FileStatus, progress: 30 } : f
+        )
+      );
+
+      try {
+        setQueue((prev) =>
+          prev.map((f) =>
+            f.id === item.id ? { ...f, progress: 60 } : f
+          )
+        );
+
+        await apiUpload("/ingest/file", item.file);
+
+        setQueue((prev) =>
+          prev.map((f) =>
+            f.id === item.id ? { ...f, status: "processing" as FileStatus, progress: 90 } : f
+          )
+        );
+
+        // Brief delay to show processing state, then mark done
+        setTimeout(() => {
+          setQueue((prev) =>
+            prev.map((f) =>
+              f.id === item.id ? { ...f, status: "done" as FileStatus, progress: 100 } : f
+            )
+          );
+        }, 500);
+      } catch (err) {
+        setQueue((prev) =>
+          prev.map((f) =>
+            f.id === item.id
+              ? { ...f, status: "error" as FileStatus, error: err instanceof Error ? err.message : "Upload failed" }
+              : f
+          )
+        );
+      }
+    });
+  }, [queue]);
 
   const pendingCount = queue.filter((f) => f.status === "pending").length;
   const hasCompleted = queue.some((f) => f.status === "done");
@@ -301,7 +271,7 @@ export default function IngestPage() {
                 )}
                 {pendingCount > 0 && (
                   <button
-                    onClick={simulateUpload}
+                    onClick={uploadFiles}
                     className="rounded-lg bg-gradient-to-r from-accent-1 to-accent-2 px-4 py-1.5 text-xs font-semibold text-white shadow-lg transition-opacity hover:opacity-90"
                   >
                     Upload {pendingCount} file{pendingCount !== 1 ? "s" : ""}
@@ -435,78 +405,28 @@ export default function IngestPage() {
         </div>
       </motion.div>
 
-      {/* Recent ingestions */}
+      {/* Info note */}
       <motion.div custom={3} variants={fadeUp} initial="hidden" animate="visible">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-text-primary">
-            Recent Ingestions
-          </h2>
-          <span className="text-xs text-text-muted">{recentIngestions.length} documents</span>
-        </div>
-        <div className="overflow-hidden rounded-2xl border border-border bg-surface/50 backdrop-blur-sm">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-widest text-text-muted">
-                  Document
-                </th>
-                <th className="hidden px-5 py-3 text-xs font-semibold uppercase tracking-widest text-text-muted sm:table-cell">
-                  Type
-                </th>
-                <th className="hidden px-5 py-3 text-xs font-semibold uppercase tracking-widest text-text-muted md:table-cell">
-                  Size
-                </th>
-                <th className="hidden px-5 py-3 text-xs font-semibold uppercase tracking-widest text-text-muted lg:table-cell">
-                  Extracted
-                </th>
-                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-widest text-text-muted">
-                  Status
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentIngestions.map((doc, i) => (
-                <tr
-                  key={doc.id}
-                  className={`transition-colors hover:bg-surface-light ${
-                    i < recentIngestions.length - 1 ? "border-b border-border/60" : ""
-                  }`}
-                >
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-3">
-                      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${fileTypeGradient(doc.type)} text-white text-[8px] font-bold`}>
-                        {doc.type}
-                      </div>
-                      <div>
-                        <div className="truncate text-sm font-medium text-text-primary max-w-[200px] sm:max-w-xs">
-                          {doc.name}
-                        </div>
-                        <div className="mt-0.5 text-[10px] text-text-muted">{doc.timestamp}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="hidden px-5 py-3.5 text-text-secondary sm:table-cell">
-                    {doc.type}
-                  </td>
-                  <td className="hidden px-5 py-3.5 text-text-muted md:table-cell">
-                    {doc.size}
-                  </td>
-                  <td className="hidden px-5 py-3.5 lg:table-cell">
-                    <div className="flex items-center gap-3 text-xs text-text-muted">
-                      <span>{doc.events} events</span>
-                      <span className="h-1 w-1 rounded-full bg-text-muted" />
-                      <span>{doc.entities} entities</span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <span className="inline-block rounded-md bg-green-400/10 px-2 py-0.5 text-xs font-medium text-green-400">
-                      Completed
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="rounded-2xl border border-border bg-surface/50 p-5 backdrop-blur-sm">
+          <div className="flex items-start gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-2/10 text-accent-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="16" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-text-primary">How it works</h3>
+              <p className="mt-1 text-xs text-text-muted leading-relaxed">
+                Uploaded documents are processed asynchronously through the NLP pipeline. Once processing completes,
+                extracted events and entities will appear on the{" "}
+                <a href="/events" className="text-accent-2 hover:underline">Events</a> and{" "}
+                <a href="/entities" className="text-accent-2 hover:underline">Entities</a> pages.
+                Processing time depends on document size and complexity.
+              </p>
+            </div>
+          </div>
         </div>
       </motion.div>
     </div>

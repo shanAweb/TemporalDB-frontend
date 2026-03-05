@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import { apiFetch } from "@/lib/api";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -36,126 +37,71 @@ interface Entity {
   events: EntityEvent[];
 }
 
-const allEntities: Entity[] = [
-  {
-    id: "ent-001",
-    name: "Acme Corp",
-    category: "organization",
-    eventCount: 24,
-    connectionCount: 8,
-    firstSeen: "Jun 12, 2024",
-    lastSeen: "Oct 15, 2024",
-    confidence: 0.96,
-    aliases: ["Acme Corporation", "ACME"],
-    events: [
-      { id: "evt-005", description: "Strategic partnership announced between Acme Corp and GlobalTech", timestamp: "Sep 10, 2024", type: "declaration", confidence: 0.87 },
-      { id: "evt-007", description: "Emergency board meeting convened to address supply chain crisis", timestamp: "Sep 3, 2024", type: "action", confidence: 0.96 },
-      { id: "evt-009", description: "Alternative supplier contract signed with EuroTech Industries", timestamp: "Aug 20, 2024", type: "action", confidence: 0.94 },
-      { id: "evt-012", description: "Acme Corp stock price declined 8% following earnings miss", timestamp: "Aug 5, 2024", type: "state_change", confidence: 0.97 },
-    ],
-  },
-  {
-    id: "ent-002",
-    name: "Asia-Pacific Supply Chain",
-    category: "infrastructure",
-    eventCount: 18,
-    connectionCount: 6,
-    firstSeen: "Jul 3, 2024",
-    lastSeen: "Oct 15, 2024",
-    confidence: 0.93,
-    aliases: ["APAC Supply Chain", "Asia-Pacific logistics network"],
-    events: [
-      { id: "evt-001", description: "Supply chain disruptions reported across Asia-Pacific region", timestamp: "Oct 15, 2024", type: "state_change", confidence: 0.95 },
-      { id: "evt-008", description: "Shipping delays averaging 14 days on trans-Pacific routes", timestamp: "Aug 28, 2024", type: "observation", confidence: 0.89 },
-    ],
-  },
-  {
-    id: "ent-003",
-    name: "Manufacturing Sector",
-    category: "sector",
-    eventCount: 15,
-    connectionCount: 5,
-    firstSeen: "Jul 15, 2024",
-    lastSeen: "Oct 1, 2024",
-    confidence: 0.91,
-    aliases: ["Manufacturing industry", "Industrial manufacturing"],
-    events: [
-      { id: "evt-002", description: "Q3 revenue declined 15% year-over-year for manufacturing sector", timestamp: "Oct 1, 2024", type: "observation", confidence: 0.92 },
-      { id: "evt-010", description: "Consumer demand forecast revised downward by 12%", timestamp: "Aug 15, 2024", type: "observation", confidence: 0.86 },
-    ],
-  },
-  {
-    id: "ent-004",
-    name: "Trade Policy",
-    category: "policy",
-    eventCount: 11,
-    connectionCount: 4,
-    firstSeen: "Aug 1, 2024",
-    lastSeen: "Sep 20, 2024",
-    confidence: 0.89,
-    aliases: ["Trade regulations", "Import/export policy"],
-    events: [
-      { id: "evt-003", description: "New trade regulations enacted affecting semiconductor imports", timestamp: "Sep 20, 2024", type: "declaration", confidence: 0.88 },
-      { id: "evt-011", description: "New tariff schedule published for Q4 semiconductor imports", timestamp: "Aug 10, 2024", type: "declaration", confidence: 0.91 },
-    ],
-  },
-  {
-    id: "ent-005",
-    name: "Production Operations",
-    category: "infrastructure",
-    eventCount: 9,
-    connectionCount: 3,
-    firstSeen: "Aug 10, 2024",
-    lastSeen: "Sep 15, 2024",
-    confidence: 0.90,
-    aliases: ["Production facilities", "Manufacturing operations"],
-    events: [
-      { id: "evt-004", description: "Production capacity reduced by 20% at primary facilities", timestamp: "Sep 15, 2024", type: "action", confidence: 0.91 },
-    ],
-  },
-  {
-    id: "ent-006",
-    name: "GlobalTech",
-    category: "organization",
-    eventCount: 7,
-    connectionCount: 3,
-    firstSeen: "Aug 22, 2024",
-    lastSeen: "Sep 10, 2024",
-    confidence: 0.85,
-    aliases: ["GlobalTech Inc.", "Global Technologies"],
-    events: [
-      { id: "evt-005", description: "Strategic partnership announced between Acme Corp and GlobalTech", timestamp: "Sep 10, 2024", type: "declaration", confidence: 0.87 },
-    ],
-  },
-  {
-    id: "ent-007",
-    name: "Logistics",
-    category: "infrastructure",
-    eventCount: 6,
-    connectionCount: 4,
-    firstSeen: "Jul 20, 2024",
-    lastSeen: "Sep 5, 2024",
-    confidence: 0.92,
-    aliases: ["Logistics operations", "Supply logistics"],
-    events: [
-      { id: "evt-006", description: "Warehouse inventory levels dropped below critical threshold", timestamp: "Sep 5, 2024", type: "state_change", confidence: 0.93 },
-    ],
-  },
-  {
-    id: "ent-008",
-    name: "EuroTech Industries",
-    category: "organization",
-    eventCount: 4,
-    connectionCount: 2,
-    firstSeen: "Aug 15, 2024",
-    lastSeen: "Aug 20, 2024",
-    confidence: 0.88,
-    aliases: ["EuroTech", "EuroTech Ind."],
-    events: [
-      { id: "evt-009", description: "Alternative supplier contract signed with EuroTech Industries", timestamp: "Aug 20, 2024", type: "action", confidence: 0.94 },
-    ],
-  },
-];
+// Backend API response types
+interface ApiEntity {
+  id: string;
+  name: string;
+  canonical_name: string;
+  type: string;
+  description: string | null;
+  aliases: string | null;
+  created_at: string;
+}
+
+interface ApiEntitiesResponse {
+  entities: ApiEntity[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+// Map backend NER type labels to internal category system
+function mapTypeToCategory(nerType: string): EntityCategory {
+  switch (nerType.toUpperCase()) {
+    case "ORG":
+      return "organization";
+    case "PERSON":
+      return "person";
+    case "GPE":
+    case "LOC":
+      return "location";
+    case "LAW":
+      return "policy";
+    case "PRODUCT":
+    case "NORP":
+      return "sector";
+    default:
+      return "infrastructure";
+  }
+}
+
+// Map backend entity to internal Entity shape
+function mapApiEntity(apiEntity: ApiEntity): Entity {
+  const category = mapTypeToCategory(apiEntity.type);
+  const aliases = apiEntity.aliases
+    ? apiEntity.aliases.split(",").map((a) => a.trim()).filter(Boolean)
+    : [];
+  const createdDate = new Date(apiEntity.created_at);
+  const formattedDate = createdDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  return {
+    id: apiEntity.id,
+    name: apiEntity.name,
+    category,
+    eventCount: 0,
+    connectionCount: 0,
+    firstSeen: formattedDate,
+    lastSeen: formattedDate,
+    confidence: 1.0,
+    aliases,
+    events: [],
+  };
+}
+
 
 const categories: { value: EntityCategory | "all"; label: string }[] = [
   { value: "all", label: "All Categories" },
@@ -235,6 +181,19 @@ function categoryIcon(cat: EntityCategory) {
 type SortField = "name" | "eventCount" | "connectionCount" | "confidence";
 type SortDir = "asc" | "desc";
 
+// Map category filter to backend entity_type parameter
+function categoryToApiType(category: EntityCategory): string | undefined {
+  switch (category) {
+    case "organization": return "ORG";
+    case "person": return "PERSON";
+    case "location": return "GPE";
+    case "policy": return "LAW";
+    case "sector": return "PRODUCT";
+    case "infrastructure": return undefined; // no single NER type maps here
+    default: return undefined;
+  }
+}
+
 export default function EntitiesPage() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<EntityCategory | "all">("all");
@@ -242,10 +201,52 @@ export default function EntitiesPage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [view, setView] = useState<"grid" | "table">("grid");
   const [expandedEntity, setExpandedEntity] = useState<string | null>(null);
+  const [allEntities, setAllEntities] = useState<Entity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [totalCount, setTotalCount] = useState<number>(0);
+
+  const fetchEntities = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "100", offset: "0" });
+      if (search) {
+        params.set("name", search);
+      }
+      if (categoryFilter !== "all") {
+        const apiType = categoryToApiType(categoryFilter);
+        if (apiType) {
+          params.set("entity_type", apiType);
+        }
+      }
+
+      const data = await apiFetch<ApiEntitiesResponse>(`/entities?${params.toString()}`);
+      const mapped = data.entities.map(mapApiEntity);
+
+      // If a category filter is set but we couldn't map it to a single API type
+      // (e.g. infrastructure), do client-side filtering
+      let result = mapped;
+      if (categoryFilter !== "all" && !categoryToApiType(categoryFilter)) {
+        result = mapped.filter((e) => e.category === categoryFilter);
+      }
+
+      setAllEntities(result);
+      setTotalCount(data.total);
+    } catch {
+      setAllEntities([]);
+      setTotalCount(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [search, categoryFilter]);
+
+  useEffect(() => {
+    fetchEntities();
+  }, [fetchEntities]);
 
   const filtered = useMemo(() => {
     let result = allEntities;
 
+    // Client-side search filtering for aliases (API only searches by name)
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -256,6 +257,7 @@ export default function EntitiesPage() {
       );
     }
 
+    // Client-side category filtering (in case API didn't handle it)
     if (categoryFilter !== "all") {
       result = result.filter((e) => e.category === categoryFilter);
     }
@@ -272,7 +274,7 @@ export default function EntitiesPage() {
     });
 
     return result;
-  }, [search, categoryFilter, sortField, sortDir]);
+  }, [allEntities, search, categoryFilter, sortField, sortDir]);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -299,12 +301,12 @@ export default function EntitiesPage() {
       counts[e.category] = (counts[e.category] || 0) + 1;
     });
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  }, []);
+  }, [allEntities]);
 
   const stats = [
     {
       label: "Total Entities",
-      value: allEntities.length.toString(),
+      value: (totalCount || allEntities.length).toString(),
       gradient: "from-accent-1 to-accent-2",
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
@@ -468,8 +470,20 @@ export default function EntitiesPage() {
         </div>
       </motion.div>
 
+      {/* Loading state */}
+      {loading && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex flex-col items-center justify-center py-20"
+        >
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent-1" />
+          <p className="mt-4 text-sm text-text-muted">Loading entities...</p>
+        </motion.div>
+      )}
+
       {/* Grid view */}
-      {view === "grid" && (
+      {!loading && view === "grid" && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <AnimatePresence>
             {filtered.map((entity, i) => {
@@ -555,23 +569,27 @@ export default function EntitiesPage() {
                             <h4 className="mb-3 text-xs font-semibold uppercase tracking-widest text-text-muted">
                               Recent Events
                             </h4>
-                            <div className="space-y-2">
-                              {entity.events.map((event) => (
-                                <div key={event.id} className="flex items-start gap-2 rounded-lg border border-border/60 bg-surface-light/30 p-3">
-                                  <div className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-2" />
-                                  <div className="min-w-0 flex-1">
-                                    <p className="text-xs text-text-primary">{event.description}</p>
-                                    <div className="mt-1 flex items-center gap-2 text-[10px] text-text-muted">
-                                      <span>{event.timestamp}</span>
-                                      <span className="h-1 w-1 rounded-full bg-text-muted" />
-                                      <span className="uppercase">{event.type.replace("_", " ")}</span>
-                                      <span className="h-1 w-1 rounded-full bg-text-muted" />
-                                      <span>{(event.confidence * 100).toFixed(0)}%</span>
+                            {entity.events.length > 0 ? (
+                              <div className="space-y-2">
+                                {entity.events.map((event) => (
+                                  <div key={event.id} className="flex items-start gap-2 rounded-lg border border-border/60 bg-surface-light/30 p-3">
+                                    <div className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-2" />
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs text-text-primary">{event.description}</p>
+                                      <div className="mt-1 flex items-center gap-2 text-[10px] text-text-muted">
+                                        <span>{event.timestamp}</span>
+                                        <span className="h-1 w-1 rounded-full bg-text-muted" />
+                                        <span className="uppercase">{event.type.replace("_", " ")}</span>
+                                        <span className="h-1 w-1 rounded-full bg-text-muted" />
+                                        <span>{(event.confidence * 100).toFixed(0)}%</span>
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              ))}
-                            </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-text-muted">No events available for this entity.</p>
+                            )}
 
                             <div className="mt-3 flex items-center gap-3">
                               <Link
@@ -605,11 +623,23 @@ export default function EntitiesPage() {
               );
             })}
           </AnimatePresence>
+
+          {filtered.length === 0 && (
+            <div className="col-span-full flex flex-col items-center justify-center py-16 text-text-muted">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-3 h-8 w-8">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+              </svg>
+              <p className="text-sm font-medium">{allEntities.length === 0 ? "No entities yet" : "No entities match your filters"}</p>
+              {allEntities.length === 0 && (
+                <p className="mt-1 text-xs">Upload documents to extract entities from your content</p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {/* Table view */}
-      {view === "table" && (
+      {!loading && view === "table" && (
         <motion.div custom={3} variants={fadeUp} initial="hidden" animate="visible">
           <div className="overflow-hidden rounded-2xl border border-border bg-surface/50 backdrop-blur-sm">
             <div className="overflow-x-auto">
@@ -715,37 +745,39 @@ export default function EntitiesPage() {
       )}
 
       {/* Category distribution */}
-      <motion.div custom={4} variants={fadeUp} initial="hidden" animate="visible">
-        <h2 className="mb-4 text-base font-semibold text-text-primary">Category Distribution</h2>
-        <div className="rounded-2xl border border-border bg-surface/50 p-5 backdrop-blur-sm">
-          <div className="space-y-3">
-            {categoryDistribution.map(([cat, count]) => {
-              const pct = (count / allEntities.length) * 100;
-              return (
-                <div key={cat} className="flex items-center gap-3">
-                  <div className="flex w-28 items-center gap-2">
-                    <span className={`flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br ${categoryGradient(cat as EntityCategory)} text-white`}>
-                      {categoryIcon(cat as EntityCategory)}
-                    </span>
-                    <span className="text-xs font-medium text-text-secondary capitalize">{cat}</span>
-                  </div>
-                  <div className="flex-1">
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-border">
-                      <motion.div
-                        className={`h-full rounded-full bg-gradient-to-r ${categoryGradient(cat as EntityCategory)}`}
-                        initial={{ width: 0 }}
-                        animate={{ width: `${pct}%` }}
-                        transition={{ duration: 0.8, delay: 0.2 }}
-                      />
+      {!loading && (
+        <motion.div custom={4} variants={fadeUp} initial="hidden" animate="visible">
+          <h2 className="mb-4 text-base font-semibold text-text-primary">Category Distribution</h2>
+          <div className="rounded-2xl border border-border bg-surface/50 p-5 backdrop-blur-sm">
+            <div className="space-y-3">
+              {categoryDistribution.map(([cat, count]) => {
+                const pct = (count / allEntities.length) * 100;
+                return (
+                  <div key={cat} className="flex items-center gap-3">
+                    <div className="flex w-28 items-center gap-2">
+                      <span className={`flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br ${categoryGradient(cat as EntityCategory)} text-white`}>
+                        {categoryIcon(cat as EntityCategory)}
+                      </span>
+                      <span className="text-xs font-medium text-text-secondary capitalize">{cat}</span>
                     </div>
+                    <div className="flex-1">
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-border">
+                        <motion.div
+                          className={`h-full rounded-full bg-gradient-to-r ${categoryGradient(cat as EntityCategory)}`}
+                          initial={{ width: 0 }}
+                          animate={{ width: `${pct}%` }}
+                          transition={{ duration: 0.8, delay: 0.2 }}
+                        />
+                      </div>
+                    </div>
+                    <span className="w-12 text-right text-xs font-medium text-text-muted">{count} ({pct.toFixed(0)}%)</span>
                   </div>
-                  <span className="w-12 text-right text-xs font-medium text-text-muted">{count} ({pct.toFixed(0)}%)</span>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      </motion.div>
+        </motion.div>
+      )}
     </div>
   );
 }

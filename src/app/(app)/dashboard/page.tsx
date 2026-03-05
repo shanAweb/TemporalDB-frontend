@@ -1,7 +1,53 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { apiFetch } from "@/lib/api";
+
+/* ------------------------------------------------------------------ */
+/*  Types for API responses                                           */
+/* ------------------------------------------------------------------ */
+
+interface ApiEvent {
+  id: string;
+  description: string;
+  event_type: string;
+  ts_start: string | null;
+  ts_end: string | null;
+  confidence: number;
+  source_sentence: string | null;
+  document_id: string | null;
+  created_at: string;
+}
+
+interface EventsResponse {
+  events: ApiEvent[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+interface ApiEntity {
+  id: string;
+  name: string;
+  canonical_name: string;
+  type: string;
+  description: string | null;
+  aliases: string[];
+  created_at: string;
+}
+
+interface EntitiesResponse {
+  entities: ApiEntity[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Animation variant                                                 */
+/* ------------------------------------------------------------------ */
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -12,64 +58,44 @@ const fadeUp = {
   }),
 };
 
-const stats = [
-  {
-    label: "Documents",
-    value: "128",
-    change: "+12 this week",
-    trend: "up" as const,
-    gradient: "from-accent-1 to-accent-3",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-        <polyline points="14 2 14 8 20 8" />
-      </svg>
-    ),
-  },
-  {
-    label: "Events Extracted",
-    value: "3,847",
-    change: "+284 this week",
-    trend: "up" as const,
-    gradient: "from-accent-2 to-accent-1",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-      </svg>
-    ),
-  },
-  {
-    label: "Entities",
-    value: "612",
-    change: "+45 this week",
-    trend: "up" as const,
-    gradient: "from-accent-3 to-[#ec4899]",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-      </svg>
-    ),
-  },
-  {
-    label: "Causal Links",
-    value: "1,205",
-    change: "+96 this week",
-    trend: "up" as const,
-    gradient: "from-[#f97316] to-accent-3",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-        <circle cx="6" cy="6" r="3" />
-        <circle cx="6" cy="18" r="3" />
-        <circle cx="18" cy="12" r="3" />
-        <line x1="8.59" y1="7.41" x2="15.42" y2="10.59" />
-        <line x1="15.41" y1="13.41" x2="8.59" y2="16.59" />
-      </svg>
-    ),
-  },
-];
+/* ------------------------------------------------------------------ */
+/*  Static icon definitions for stat cards                            */
+/* ------------------------------------------------------------------ */
+
+const statIcons = {
+  documents: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+    </svg>
+  ),
+  events: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  ),
+  entities: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  ),
+  causalLinks: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="12" r="3" />
+      <line x1="8.59" y1="7.41" x2="15.42" y2="10.59" />
+      <line x1="15.41" y1="13.41" x2="8.59" y2="16.59" />
+    </svg>
+  ),
+};
+
+/* ------------------------------------------------------------------ */
+/*  Static data that doesn't come from the API                        */
+/* ------------------------------------------------------------------ */
 
 const quickActions = [
   {
@@ -114,75 +140,6 @@ const quickActions = [
   },
 ];
 
-const recentEvents = [
-  {
-    id: "evt-001",
-    description: "Supply chain disruptions reported across Asia-Pacific region",
-    type: "state_change",
-    timestamp: "2024-10-15T09:30:00Z",
-    confidence: 0.95,
-    entity: "Asia-Pacific Supply Chain",
-  },
-  {
-    id: "evt-002",
-    description: "Q3 revenue declined 15% year-over-year for manufacturing sector",
-    type: "action",
-    timestamp: "2024-10-01T00:00:00Z",
-    confidence: 0.92,
-    entity: "Manufacturing Sector",
-  },
-  {
-    id: "evt-003",
-    description: "New trade regulations enacted affecting semiconductor imports",
-    type: "state_change",
-    timestamp: "2024-09-20T14:00:00Z",
-    confidence: 0.88,
-    entity: "Trade Policy",
-  },
-  {
-    id: "evt-004",
-    description: "Production capacity reduced by 20% at primary facilities",
-    type: "action",
-    timestamp: "2024-09-15T08:00:00Z",
-    confidence: 0.91,
-    entity: "Production Operations",
-  },
-  {
-    id: "evt-005",
-    description: "Strategic partnership announced between Acme Corp and GlobalTech",
-    type: "action",
-    timestamp: "2024-09-10T16:00:00Z",
-    confidence: 0.87,
-    entity: "Acme Corp",
-  },
-];
-
-const recentQueries = [
-  {
-    question: "Why did revenue drop in Q3?",
-    intent: "CAUSAL_WHY",
-    confidence: 0.87,
-    timestamp: "2 hours ago",
-  },
-  {
-    question: "What happened between July and September?",
-    intent: "TEMPORAL_RANGE",
-    confidence: 0.92,
-    timestamp: "5 hours ago",
-  },
-  {
-    question: "Find events similar to the supply chain disruption",
-    intent: "SIMILARITY",
-    confidence: 0.79,
-    timestamp: "1 day ago",
-  },
-  {
-    question: "Show me everything about Acme Corp",
-    intent: "ENTITY_TIMELINE",
-    confidence: 0.94,
-    timestamp: "1 day ago",
-  },
-];
 
 const pipelineStages = [
   { name: "NER", status: "active" },
@@ -194,6 +151,10 @@ const pipelineStages = [
   { name: "Embeddings", status: "active" },
 ];
 
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                           */
+/* ------------------------------------------------------------------ */
+
 function formatTimestamp(ts: string) {
   return new Date(ts).toLocaleDateString("en-US", {
     month: "short",
@@ -202,22 +163,112 @@ function formatTimestamp(ts: string) {
   });
 }
 
-function intentColor(intent: string) {
-  switch (intent) {
-    case "CAUSAL_WHY":
-      return "bg-accent-1/10 text-accent-1";
-    case "TEMPORAL_RANGE":
-      return "bg-accent-2/10 text-accent-2";
-    case "SIMILARITY":
-      return "bg-accent-3/10 text-accent-3";
-    case "ENTITY_TIMELINE":
-      return "bg-[#f97316]/10 text-[#f97316]";
-    default:
-      return "bg-text-muted/10 text-text-muted";
-  }
+function formatNumber(n: number): string {
+  return n.toLocaleString("en-US");
 }
 
+/* ------------------------------------------------------------------ */
+/*  Component                                                         */
+/* ------------------------------------------------------------------ */
+
 export default function DashboardPage() {
+  interface RecentEvent {
+    id: string;
+    description: string;
+    type: string;
+    timestamp: string;
+    confidence: number;
+    entity: string;
+  }
+
+  const [loading, setLoading] = useState(true);
+  const [totalEvents, setTotalEvents] = useState<number | null>(null);
+  const [totalEntities, setTotalEntities] = useState<number | null>(null);
+  const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchData() {
+      setLoading(true);
+
+      // Fetch events and entities in parallel
+      const [eventsResult, entitiesResult] = await Promise.allSettled([
+        apiFetch<EventsResponse>("/events?limit=5"),
+        apiFetch<EntitiesResponse>("/entities?limit=100"),
+      ]);
+
+      if (cancelled) return;
+
+      // --- Events ---
+      if (eventsResult.status === "fulfilled") {
+        const data = eventsResult.value;
+        setTotalEvents(data.total);
+        setRecentEvents(
+          data.events.map((e) => ({
+            id: e.id,
+            description: e.description,
+            type: e.event_type,
+            timestamp: e.ts_start || e.created_at,
+            confidence: e.confidence,
+            entity: e.source_sentence
+              ? e.source_sentence.slice(0, 30) + (e.source_sentence.length > 30 ? "..." : "")
+              : "—",
+          }))
+        );
+      }
+
+      // --- Entities ---
+      if (entitiesResult.status === "fulfilled") {
+        setTotalEntities(entitiesResult.value.total);
+      }
+
+      setLoading(false);
+    }
+
+    fetchData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /* Build stat cards dynamically so values reflect API data */
+  const stats = [
+    {
+      label: "Documents",
+      value: "\u2014",
+      change: "\u2014",
+      trend: "up" as const,
+      gradient: "from-accent-1 to-accent-3",
+      icon: statIcons.documents,
+    },
+    {
+      label: "Events Extracted",
+      value: loading ? "..." : totalEvents !== null ? formatNumber(totalEvents) : "0",
+      change: loading ? "..." : totalEvents !== null ? `${formatNumber(totalEvents)} total` : "0 total",
+      trend: "up" as const,
+      gradient: "from-accent-2 to-accent-1",
+      icon: statIcons.events,
+    },
+    {
+      label: "Entities",
+      value: loading ? "..." : totalEntities !== null ? formatNumber(totalEntities) : "0",
+      change: loading ? "..." : totalEntities !== null ? `${formatNumber(totalEntities)} total` : "0 total",
+      trend: "up" as const,
+      gradient: "from-accent-3 to-[#ec4899]",
+      icon: statIcons.entities,
+    },
+    {
+      label: "Causal Links",
+      value: "\u2014",
+      change: "\u2014",
+      trend: "up" as const,
+      gradient: "from-[#f97316] to-accent-3",
+      icon: statIcons.causalLinks,
+    },
+  ];
+
   return (
     <div className="space-y-8">
       {/* Page header */}
@@ -334,64 +385,84 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="overflow-hidden rounded-2xl border border-border bg-surface/50 backdrop-blur-sm">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="px-5 py-3 text-xs font-semibold uppercase tracking-widest text-text-muted">
-                    Event
-                  </th>
-                  <th className="hidden px-5 py-3 text-xs font-semibold uppercase tracking-widest text-text-muted md:table-cell">
-                    Entity
-                  </th>
-                  <th className="hidden px-5 py-3 text-xs font-semibold uppercase tracking-widest text-text-muted sm:table-cell">
-                    Date
-                  </th>
-                  <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-widest text-text-muted">
-                    Confidence
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentEvents.map((event, i) => (
-                  <tr
-                    key={event.id}
-                    className={`transition-colors hover:bg-surface-light ${
-                      i < recentEvents.length - 1 ? "border-b border-border/60" : ""
-                    }`}
-                  >
-                    <td className="px-5 py-3.5">
-                      <div className="max-w-xs truncate text-text-primary">
-                        {event.description}
-                      </div>
-                      <div className="mt-0.5 text-xs text-text-muted">
-                        {event.type}
-                      </div>
-                    </td>
-                    <td className="hidden px-5 py-3.5 text-text-secondary md:table-cell">
-                      {event.entity}
-                    </td>
-                    <td className="hidden px-5 py-3.5 text-text-muted sm:table-cell whitespace-nowrap">
-                      {formatTimestamp(event.timestamp)}
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
-                      <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${
-                        event.confidence >= 0.9
-                          ? "bg-green-400/10 text-green-400"
-                          : event.confidence >= 0.8
-                          ? "bg-accent-2/10 text-accent-2"
-                          : "bg-[#f97316]/10 text-[#f97316]"
-                      }`}>
-                        {(event.confidence * 100).toFixed(0)}%
-                      </span>
-                    </td>
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="flex items-center gap-3 text-sm text-text-muted">
+                  <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Loading events...
+                </div>
+              </div>
+            ) : recentEvents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-text-muted">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-3 h-8 w-8">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+                <p className="text-sm font-medium">No events yet</p>
+                <p className="mt-1 text-xs">Upload documents via the <Link href="/ingest" className="text-accent-2 hover:underline">Ingest</Link> page to extract events</p>
+              </div>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="px-5 py-3 text-xs font-semibold uppercase tracking-widest text-text-muted">
+                      Event
+                    </th>
+                    <th className="hidden px-5 py-3 text-xs font-semibold uppercase tracking-widest text-text-muted md:table-cell">
+                      Entity
+                    </th>
+                    <th className="hidden px-5 py-3 text-xs font-semibold uppercase tracking-widest text-text-muted sm:table-cell">
+                      Date
+                    </th>
+                    <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-widest text-text-muted">
+                      Confidence
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {recentEvents.map((event, i) => (
+                    <tr
+                      key={event.id}
+                      className={`transition-colors hover:bg-surface-light ${
+                        i < recentEvents.length - 1 ? "border-b border-border/60" : ""
+                      }`}
+                    >
+                      <td className="px-5 py-3.5">
+                        <div className="max-w-xs truncate text-text-primary">
+                          {event.description}
+                        </div>
+                        <div className="mt-0.5 text-xs text-text-muted">
+                          {event.type}
+                        </div>
+                      </td>
+                      <td className="hidden px-5 py-3.5 text-text-secondary md:table-cell">
+                        {event.entity}
+                      </td>
+                      <td className="hidden px-5 py-3.5 text-text-muted sm:table-cell whitespace-nowrap">
+                        {formatTimestamp(event.timestamp)}
+                      </td>
+                      <td className="px-5 py-3.5 text-right">
+                        <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${
+                          event.confidence >= 0.9
+                            ? "bg-green-400/10 text-green-400"
+                            : event.confidence >= 0.8
+                            ? "bg-accent-2/10 text-accent-2"
+                            : "bg-[#f97316]/10 text-[#f97316]"
+                        }`}>
+                          {(event.confidence * 100).toFixed(0)}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </motion.div>
 
-        {/* Recent Queries - 1/3 width */}
+        {/* Quick Start - 1/3 width */}
         <motion.div
           custom={7}
           variants={fadeUp}
@@ -400,7 +471,7 @@ export default function DashboardPage() {
         >
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold text-text-primary">
-              Recent Queries
+              Get Started
             </h2>
             <Link
               href="/query"
@@ -410,23 +481,24 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="space-y-3">
-            {recentQueries.map((q, i) => (
-              <div
-                key={i}
-                className="rounded-xl border border-border bg-surface/50 p-4 backdrop-blur-sm transition-all duration-200 hover:border-border-light hover:bg-surface"
+            {[
+              { title: "1. Upload Documents", desc: "Ingest PDF, DOCX, TXT, or Markdown files", href: "/ingest" },
+              { title: "2. Explore Events", desc: "View extracted events and their timelines", href: "/events" },
+              { title: "3. Browse Entities", desc: "See entities extracted from your documents", href: "/entities" },
+              { title: "4. Ask Questions", desc: "Query your knowledge base with natural language", href: "/query" },
+            ].map((step) => (
+              <Link
+                key={step.href}
+                href={step.href}
+                className="block rounded-xl border border-border bg-surface/50 p-4 backdrop-blur-sm transition-all duration-200 hover:border-border-light hover:bg-surface"
               >
                 <p className="text-sm font-medium text-text-primary leading-snug">
-                  &ldquo;{q.question}&rdquo;
+                  {step.title}
                 </p>
-                <div className="mt-2.5 flex items-center gap-2">
-                  <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${intentColor(q.intent)}`}>
-                    {q.intent.replace("_", " ")}
-                  </span>
-                  <span className="text-[10px] text-text-muted">
-                    {q.timestamp}
-                  </span>
-                </div>
-              </div>
+                <p className="mt-1 text-xs text-text-muted">
+                  {step.desc}
+                </p>
+              </Link>
             ))}
           </div>
         </motion.div>

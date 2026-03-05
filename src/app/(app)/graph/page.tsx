@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { apiFetch } from "@/lib/api";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -35,38 +36,92 @@ interface GraphEdge {
   weight: number;
 }
 
-const initialNodes: GraphNode[] = [
-  { id: "n-acme", label: "Acme Corp", category: "organization", x: 450, y: 200, eventCount: 24, confidence: 0.96 },
-  { id: "n-globaltech", label: "GlobalTech", category: "organization", x: 700, y: 120, eventCount: 7, confidence: 0.85 },
-  { id: "n-eurotech", label: "EuroTech Ind.", category: "organization", x: 250, y: 100, eventCount: 4, confidence: 0.88 },
-  { id: "n-apac", label: "APAC Supply Chain", category: "infrastructure", x: 600, y: 350, eventCount: 18, confidence: 0.93 },
-  { id: "n-production", label: "Production Ops", category: "infrastructure", x: 300, y: 350, eventCount: 9, confidence: 0.90 },
-  { id: "n-logistics", label: "Logistics", category: "infrastructure", x: 150, y: 280, eventCount: 6, confidence: 0.92 },
-  { id: "n-trade", label: "Trade Policy", category: "policy", x: 750, y: 300, eventCount: 11, confidence: 0.89 },
-  { id: "n-mfg", label: "Manufacturing Sector", category: "sector", x: 450, y: 450, eventCount: 15, confidence: 0.91 },
-  { id: "evt-disruption", label: "Supply Chain Disruption", category: "event", x: 550, y: 250, description: "Disruptions across Asia-Pacific", timestamp: "Oct 15, 2024", confidence: 0.95 },
-  { id: "evt-revenue", label: "Q3 Revenue Decline", category: "event", x: 350, y: 500, description: "Revenue declined 15% YoY", timestamp: "Oct 1, 2024", confidence: 0.92 },
-  { id: "evt-regulations", label: "New Trade Regulations", category: "event", x: 750, y: 430, description: "Semiconductor import regulations", timestamp: "Sep 20, 2024", confidence: 0.88 },
-  { id: "evt-capacity", label: "Production Cut 20%", category: "event", x: 200, y: 450, description: "Capacity reduced at primary facilities", timestamp: "Sep 15, 2024", confidence: 0.91 },
-  { id: "evt-partnership", label: "Strategic Partnership", category: "event", x: 600, y: 80, description: "Acme Corp & GlobalTech partnership", timestamp: "Sep 10, 2024", confidence: 0.87 },
-];
+// --- API response types ---
+interface EntityListResponse {
+  entities: { id: string; name: string; canonical_name: string; type: string }[];
+  total: number;
+  offset: number;
+  limit: number;
+}
 
-const initialEdges: GraphEdge[] = [
-  { id: "e-1", source: "n-trade", target: "evt-regulations", label: "enacted", type: "causal", weight: 0.92 },
-  { id: "e-2", source: "evt-regulations", target: "evt-disruption", label: "caused", type: "causal", weight: 0.88 },
-  { id: "e-3", source: "evt-disruption", target: "n-apac", label: "affected", type: "causal", weight: 0.95 },
-  { id: "e-4", source: "evt-disruption", target: "evt-capacity", label: "led to", type: "causal", weight: 0.85 },
-  { id: "e-5", source: "evt-capacity", target: "n-production", label: "impacted", type: "causal", weight: 0.91 },
-  { id: "e-6", source: "evt-capacity", target: "evt-revenue", label: "caused", type: "causal", weight: 0.87 },
-  { id: "e-7", source: "evt-revenue", target: "n-mfg", label: "sector impact", type: "causal", weight: 0.90 },
-  { id: "e-8", source: "n-acme", target: "evt-partnership", label: "announced", type: "membership", weight: 0.87 },
-  { id: "e-9", source: "n-globaltech", target: "evt-partnership", label: "partner", type: "membership", weight: 0.87 },
-  { id: "e-10", source: "n-acme", target: "n-eurotech", label: "supplier contract", type: "membership", weight: 0.94 },
-  { id: "e-11", source: "n-acme", target: "evt-revenue", label: "reported", type: "membership", weight: 0.92 },
-  { id: "e-12", source: "n-logistics", target: "evt-disruption", label: "impacted by", type: "causal", weight: 0.89 },
-  { id: "e-13", source: "n-logistics", target: "n-production", label: "feeds into", type: "temporal", weight: 0.80 },
-  { id: "e-14", source: "evt-regulations", target: "n-mfg", label: "constrains", type: "causal", weight: 0.82 },
-];
+interface GraphApiNode {
+  id: string;
+  label: string;
+  type: "event" | "entity";
+  properties: {
+    event_type?: string;
+    ts_start?: string;
+    confidence?: number;
+    entity_type?: string;
+  };
+}
+
+interface GraphApiEdge {
+  source: string;
+  target: string;
+  type: "INVOLVES" | "CAUSES";
+  confidence: number | null;
+}
+
+interface GraphApiResponse {
+  nodes: GraphApiNode[];
+  edges: GraphApiEdge[];
+}
+
+
+// --- Helpers ---
+
+function mapEntityTypeToCategory(entityType: string): NodeCategory {
+  const lower = entityType.toLowerCase();
+  if (lower.includes("person") || lower.includes("individual")) return "person";
+  if (lower.includes("org") || lower.includes("company") || lower.includes("corporation")) return "organization";
+  if (lower.includes("policy") || lower.includes("regulation") || lower.includes("law")) return "policy";
+  if (lower.includes("sector") || lower.includes("industry") || lower.includes("market")) return "sector";
+  if (lower.includes("infra") || lower.includes("facility") || lower.includes("system") || lower.includes("supply")) return "infrastructure";
+  // Default non-event entities to organization
+  return "organization";
+}
+
+function mapApiNodeToGraphNode(apiNode: GraphApiNode, index: number, total: number): GraphNode {
+  // Spread nodes across the canvas (roughly 900x500 area)
+  const angle = (2 * Math.PI * index) / total + (Math.random() - 0.5) * 0.5;
+  const radiusX = 250 + Math.random() * 100;
+  const radiusY = 150 + Math.random() * 80;
+  const cx = 450;
+  const cy = 280;
+
+  const category: NodeCategory =
+    apiNode.type === "event"
+      ? "event"
+      : mapEntityTypeToCategory(apiNode.properties.entity_type || "organization");
+
+  return {
+    id: apiNode.id,
+    label: apiNode.label,
+    category,
+    x: cx + Math.cos(angle) * radiusX,
+    y: cy + Math.sin(angle) * radiusY,
+    confidence: apiNode.properties.confidence,
+    timestamp: apiNode.properties.ts_start,
+    description: apiNode.properties.event_type,
+  };
+}
+
+function mapApiEdgeToGraphEdge(apiEdge: GraphApiEdge, index: number): GraphEdge {
+  const edgeType: GraphEdge["type"] =
+    apiEdge.type === "CAUSES" ? "causal" : "membership";
+
+  return {
+    id: `api-edge-${index}`,
+    source: apiEdge.source,
+    target: apiEdge.target,
+    label: apiEdge.type === "CAUSES" ? "causes" : "involves",
+    type: edgeType,
+    weight: apiEdge.confidence ?? 0.8,
+  };
+}
+
+// --- Color / styling functions (unchanged) ---
 
 function categoryColor(cat: NodeCategory): string {
   switch (cat) {
@@ -111,7 +166,8 @@ function edgeDash(type: GraphEdge["type"]): string {
 export default function GraphPage() {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [nodes, setNodes] = useState<GraphNode[]>(initialNodes);
+  const [nodes, setNodes] = useState<GraphNode[]>([]);
+  const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [draggingNode, setDraggingNode] = useState<string | null>(null);
@@ -122,10 +178,85 @@ export default function GraphPage() {
   const [edgeFilter, setEdgeFilter] = useState<GraphEdge["type"] | "all">("all");
   const [showLabels, setShowLabels] = useState(true);
 
+  // --- Entity selector state ---
+  const [entities, setEntities] = useState<{ id: string; name: string; type: string }[]>([]);
+  const [selectedEntityId, setSelectedEntityId] = useState<string>("");
+  const [loadingEntities, setLoadingEntities] = useState(false);
+  const [loadingGraph, setLoadingGraph] = useState(false);
+  const [dataSource, setDataSource] = useState<"empty" | "api">("empty");
+
+  // Fetch entities list on mount
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingEntities(true);
+
+    apiFetch<EntityListResponse>("/entities?limit=100")
+      .then((data) => {
+        if (cancelled) return;
+        setEntities(
+          data.entities.map((e) => ({ id: e.id, name: e.name || e.canonical_name, type: e.type }))
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn("Failed to fetch entities, using mock data:", err);
+        // Leave entities empty; mock data stays as fallback
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingEntities(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Fetch graph when entity is selected
+  useEffect(() => {
+    if (!selectedEntityId) {
+      setNodes([]);
+      setEdges([]);
+      setDataSource("empty");
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingGraph(true);
+
+    apiFetch<GraphApiResponse>(`/graph/entity/${selectedEntityId}`)
+      .then((data) => {
+        if (cancelled) return;
+
+        const totalNodes = data.nodes.length;
+        const mappedNodes = data.nodes.map((n, i) => mapApiNodeToGraphNode(n, i, totalNodes));
+        const mappedEdges = data.edges.map((e, i) => mapApiEdgeToGraphEdge(e, i));
+
+        setNodes(mappedNodes);
+        setEdges(mappedEdges);
+        setDataSource("api");
+
+        // Reset view for new graph
+        setPan({ x: 0, y: 0 });
+        setZoom(1);
+        setSelectedNode(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn("Failed to fetch graph, keeping current data:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingGraph(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEntityId]);
+
   const filteredEdges = useMemo(() => {
-    if (edgeFilter === "all") return initialEdges;
-    return initialEdges.filter((e) => e.type === edgeFilter);
-  }, [edgeFilter]);
+    if (edgeFilter === "all") return edges;
+    return edges.filter((e) => e.type === edgeFilter);
+  }, [edgeFilter, edges]);
 
   // Nodes connected to selected
   const connectedNodeIds = useMemo(() => {
@@ -235,6 +366,44 @@ export default function GraphPage() {
       {/* Toolbar */}
       <motion.div custom={1} variants={fadeUp} initial="hidden" animate="visible">
         <div className="flex flex-wrap items-center gap-3">
+          {/* Entity selector */}
+          <select
+            value={selectedEntityId}
+            onChange={(e) => setSelectedEntityId(e.target.value)}
+            disabled={loadingEntities}
+            className="h-9 max-w-[220px] truncate rounded-lg border border-border bg-surface/60 px-3 text-sm text-text-secondary outline-none transition-colors focus:border-accent-1/50 cursor-pointer disabled:opacity-50"
+          >
+            <option value="">
+              {loadingEntities ? "Loading entities..." : "Select an entity..."}
+            </option>
+            {entities.map((ent) => (
+              <option key={ent.id} value={ent.id}>
+                {ent.name} ({ent.type})
+              </option>
+            ))}
+          </select>
+
+          {/* Loading indicator */}
+          {loadingGraph && (
+            <span className="text-xs text-text-muted animate-pulse">Loading graph...</span>
+          )}
+
+          {/* Data source badge */}
+          {!loadingGraph && (
+            <span
+              className={`rounded-md border px-2 py-0.5 text-[10px] font-medium ${
+                dataSource === "api"
+                  ? "border-green-400/30 bg-green-400/10 text-green-400"
+                  : "border-border bg-surface-light/30 text-text-muted"
+              }`}
+            >
+              {dataSource === "api" ? "Live data" : "No entity selected"}
+            </span>
+          )}
+
+          {/* Divider */}
+          <div className="h-5 w-px bg-border" />
+
           {/* Edge type filter */}
           <select
             value={edgeFilter}
@@ -447,12 +616,30 @@ export default function GraphPage() {
               </div>
             </div>
 
+            {/* Empty state */}
+            {nodes.length === 0 && !loadingGraph && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-text-muted">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-3 h-10 w-10">
+                  <circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="12" r="3" />
+                  <line x1="8.59" y1="7.41" x2="15.42" y2="10.59" /><line x1="15.41" y1="13.41" x2="8.59" y2="16.59" />
+                </svg>
+                <p className="text-sm font-medium">
+                  {entities.length === 0 ? "No entities available" : "Select an entity to view its graph"}
+                </p>
+                {entities.length === 0 && (
+                  <p className="mt-1 text-xs">Upload documents to populate the knowledge graph</p>
+                )}
+              </div>
+            )}
+
             {/* Instructions */}
-            <div className="absolute top-4 right-4 rounded-lg border border-border bg-surface/80 px-3 py-2 backdrop-blur-sm">
-              <p className="text-[10px] text-text-muted">
-                Drag nodes to reposition &middot; Scroll to zoom &middot; Click background to deselect
-              </p>
-            </div>
+            {nodes.length > 0 && (
+              <div className="absolute top-4 right-4 rounded-lg border border-border bg-surface/80 px-3 py-2 backdrop-blur-sm">
+                <p className="text-[10px] text-text-muted">
+                  Drag nodes to reposition &middot; Scroll to zoom &middot; Click background to deselect
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Detail panel */}

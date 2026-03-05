@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { apiFetch } from "@/lib/api";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -28,133 +29,72 @@ interface TimelineEvent {
   causalParent?: string;
 }
 
-const allEvents: TimelineEvent[] = [
-  {
-    id: "evt-001",
-    description: "Supply chain disruptions reported across Asia-Pacific region",
-    type: "state_change",
-    timestamp: "Oct 15, 2024",
-    rawDate: "2024-10-15",
-    confidence: 0.95,
-    entity: "Asia-Pacific Supply Chain",
-    source: "supply_chain_analysis.docx",
-    causalParent: "evt-003",
-  },
-  {
-    id: "evt-002",
-    description: "Q3 revenue declined 15% year-over-year for manufacturing sector",
-    type: "observation",
-    timestamp: "Oct 1, 2024",
-    rawDate: "2024-10-01",
-    confidence: 0.92,
-    entity: "Manufacturing Sector",
-    source: "Q3_Financial_Report.pdf",
-    causalParent: "evt-004",
-  },
-  {
-    id: "evt-003",
-    description: "New trade regulations enacted affecting semiconductor imports",
-    type: "declaration",
-    timestamp: "Sep 20, 2024",
-    rawDate: "2024-09-20",
-    confidence: 0.88,
-    entity: "Trade Policy",
-    source: "trade_regulations_update.md",
-  },
-  {
-    id: "evt-004",
-    description: "Production capacity reduced by 20% at primary facilities",
-    type: "action",
-    timestamp: "Sep 15, 2024",
-    rawDate: "2024-09-15",
-    confidence: 0.91,
-    entity: "Production Operations",
-    source: "supply_chain_analysis.docx",
-    causalParent: "evt-001",
-  },
-  {
-    id: "evt-005",
-    description: "Strategic partnership announced between Acme Corp and GlobalTech",
-    type: "declaration",
-    timestamp: "Sep 10, 2024",
-    rawDate: "2024-09-10",
-    confidence: 0.87,
-    entity: "Acme Corp",
-    source: "meeting_notes_oct.txt",
-  },
-  {
-    id: "evt-006",
-    description: "Warehouse inventory levels dropped below critical threshold",
-    type: "state_change",
-    timestamp: "Sep 5, 2024",
-    rawDate: "2024-09-05",
-    confidence: 0.93,
-    entity: "Logistics",
-    source: "supply_chain_analysis.docx",
-    causalParent: "evt-001",
-  },
-  {
-    id: "evt-007",
-    description: "Emergency board meeting convened to address supply chain crisis",
-    type: "action",
-    timestamp: "Sep 3, 2024",
-    rawDate: "2024-09-03",
-    confidence: 0.96,
-    entity: "Acme Corp",
-    source: "meeting_notes_oct.txt",
-  },
-  {
-    id: "evt-008",
-    description: "Shipping delays averaging 14 days on trans-Pacific routes",
-    type: "observation",
-    timestamp: "Aug 28, 2024",
-    rawDate: "2024-08-28",
-    confidence: 0.89,
-    entity: "Asia-Pacific Supply Chain",
-    source: "supply_chain_analysis.docx",
-  },
-  {
-    id: "evt-009",
-    description: "Alternative supplier contract signed with EuroTech Industries",
-    type: "action",
-    timestamp: "Aug 20, 2024",
-    rawDate: "2024-08-20",
-    confidence: 0.94,
-    entity: "Acme Corp",
-    source: "Q3_Financial_Report.pdf",
-  },
-  {
-    id: "evt-010",
-    description: "Consumer demand forecast revised downward by 12%",
-    type: "observation",
-    timestamp: "Aug 15, 2024",
-    rawDate: "2024-08-15",
-    confidence: 0.86,
-    entity: "Manufacturing Sector",
-    source: "Q3_Financial_Report.pdf",
-  },
-  {
-    id: "evt-011",
-    description: "New tariff schedule published for Q4 semiconductor imports",
-    type: "declaration",
-    timestamp: "Aug 10, 2024",
-    rawDate: "2024-08-10",
-    confidence: 0.91,
-    entity: "Trade Policy",
-    source: "trade_regulations_update.md",
-  },
-  {
-    id: "evt-012",
-    description: "Acme Corp stock price declined 8% following earnings miss",
-    type: "state_change",
-    timestamp: "Aug 5, 2024",
-    rawDate: "2024-08-05",
-    confidence: 0.97,
-    entity: "Acme Corp",
-    source: "Q3_Financial_Report.pdf",
-    causalParent: "evt-002",
-  },
-];
+interface ApiEvent {
+  id: string;
+  description: string;
+  event_type: string | null;
+  ts_start: string | null;
+  ts_end: string | null;
+  confidence: number;
+  source_sentence: string | null;
+  document_id: string;
+  created_at: string;
+}
+
+interface ApiEventsResponse {
+  events: ApiEvent[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+
+/* ── Helpers ────────────────────────────────────────────────────────── */
+
+const VALID_EVENT_TYPES: EventType[] = ["state_change", "action", "observation", "declaration"];
+
+function normalizeEventType(raw: string | null): EventType {
+  if (raw && VALID_EVENT_TYPES.includes(raw as EventType)) return raw as EventType;
+  return "observation"; // sensible default
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return "\u2014";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return "\u2014";
+  }
+}
+
+function toRawDate(iso: string | null): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toISOString().slice(0, 10);
+  } catch {
+    return "";
+  }
+}
+
+function shortenUUID(uuid: string): string {
+  return uuid.length > 8 ? uuid.slice(0, 8) + "\u2026" : uuid;
+}
+
+function mapApiEvent(e: ApiEvent): TimelineEvent {
+  return {
+    id: e.id,
+    description: e.description,
+    type: normalizeEventType(e.event_type),
+    timestamp: formatDate(e.ts_start),
+    rawDate: toRawDate(e.ts_start) || toRawDate(e.created_at),
+    confidence: e.confidence,
+    entity: e.event_type
+      ? e.event_type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+      : "\u2014",
+    source: e.document_id ? shortenUUID(e.document_id) : "\u2014",
+  };
+}
 
 const eventTypes: { value: EventType | "all"; label: string }[] = [
   { value: "all", label: "All Types" },
@@ -163,8 +103,6 @@ const eventTypes: { value: EventType | "all"; label: string }[] = [
   { value: "observation", label: "Observation" },
   { value: "declaration", label: "Declaration" },
 ];
-
-const entities = ["All Entities", ...Array.from(new Set(allEvents.map((e) => e.entity)))];
 
 function typeColor(type: EventType): string {
   switch (type) {
@@ -190,7 +128,60 @@ function confidenceColor(c: number): string {
   return "bg-[#f97316]/10 text-[#f97316]";
 }
 
+/* ── Skeleton component ─────────────────────────────────────────────── */
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-8">
+      {/* Stats skeleton */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className="relative overflow-hidden rounded-2xl border border-border bg-surface/50 p-5 backdrop-blur-sm"
+          >
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 animate-pulse rounded-xl bg-surface-light" />
+              <div className="space-y-2">
+                <div className="h-6 w-12 animate-pulse rounded bg-surface-light" />
+                <div className="h-3 w-20 animate-pulse rounded bg-surface-light" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Table skeleton */}
+      <div className="overflow-hidden rounded-2xl border border-border bg-surface/50 backdrop-blur-sm">
+        <div className="border-b border-border px-5 py-3">
+          <div className="h-4 w-32 animate-pulse rounded bg-surface-light" />
+        </div>
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className={`flex items-center gap-4 px-5 py-3.5 ${
+              i < 5 ? "border-b border-border/60" : ""
+            }`}
+          >
+            <div className="h-2 w-2 animate-pulse rounded-full bg-surface-light" />
+            <div className="flex-1 space-y-1.5">
+              <div className="h-4 w-3/4 animate-pulse rounded bg-surface-light" />
+              <div className="h-3 w-1/3 animate-pulse rounded bg-surface-light" />
+            </div>
+            <div className="h-5 w-12 animate-pulse rounded bg-surface-light" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Page component ─────────────────────────────────────────────────── */
+
 export default function EventsPage() {
+  const [allEvents, setAllEvents] = useState<TimelineEvent[]>([]);
+  const [totalFromApi, setTotalFromApi] = useState<number>(0);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<EventType | "all">("all");
   const [entityFilter, setEntityFilter] = useState("All Entities");
@@ -198,6 +189,34 @@ export default function EventsPage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [view, setView] = useState<"table" | "timeline">("table");
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
+
+  const fetchEvents = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "100", offset: "0" });
+      if (typeFilter !== "all") {
+        params.set("event_type", typeFilter);
+      }
+      const data = await apiFetch<ApiEventsResponse>(`/events?${params.toString()}`);
+      const mapped = data.events.map(mapApiEvent);
+      setAllEvents(mapped);
+      setTotalFromApi(data.total);
+    } catch {
+      setAllEvents([]);
+      setTotalFromApi(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [typeFilter]);
+
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
+
+  const entities = useMemo(
+    () => ["All Entities", ...Array.from(new Set(allEvents.map((e) => e.entity)))],
+    [allEvents]
+  );
 
   const filtered = useMemo(() => {
     let result = allEvents;
@@ -237,7 +256,7 @@ export default function EventsPage() {
     });
 
     return result;
-  }, [search, typeFilter, entityFilter, sortField, sortDir]);
+  }, [allEvents, search, typeFilter, entityFilter, sortField, sortDir]);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -257,11 +276,11 @@ export default function EventsPage() {
     );
   };
 
-  // Stats
+  // Stats derived from real data
   const stats = [
     {
       label: "Total Events",
-      value: allEvents.length.toString(),
+      value: totalFromApi.toString(),
       gradient: "from-accent-1 to-accent-2",
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
@@ -271,7 +290,9 @@ export default function EventsPage() {
     },
     {
       label: "Avg Confidence",
-      value: (allEvents.reduce((s, e) => s + e.confidence, 0) / allEvents.length * 100).toFixed(0) + "%",
+      value: allEvents.length
+        ? (allEvents.reduce((s, e) => s + e.confidence, 0) / allEvents.length * 100).toFixed(0) + "%"
+        : "\u2014",
       gradient: "from-accent-2 to-accent-3",
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
@@ -308,6 +329,20 @@ export default function EventsPage() {
       ),
     },
   ];
+
+  if (loading) {
+    return (
+      <div className="space-y-8">
+        <motion.div custom={0} variants={fadeUp} initial="hidden" animate="visible">
+          <h1 className="text-2xl font-bold tracking-tight text-text-primary">Events</h1>
+          <p className="mt-1 text-sm text-text-muted">
+            Browse and explore all extracted events from your documents
+          </p>
+        </motion.div>
+        <LoadingSkeleton />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -535,10 +570,12 @@ export default function EventsPage() {
             {filtered.length === 0 && (
               <div className="flex flex-col items-center justify-center py-16 text-text-muted">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-3 h-8 w-8">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                 </svg>
-                <p className="text-sm">No events match your filters</p>
+                <p className="text-sm font-medium">{allEvents.length === 0 ? "No events yet" : "No events match your filters"}</p>
+                {allEvents.length === 0 && (
+                  <p className="mt-1 text-xs">Upload documents to extract events from your content</p>
+                )}
               </div>
             )}
           </div>
