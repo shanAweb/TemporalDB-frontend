@@ -164,3 +164,9 @@ export const connectorsApi = {
   validate: (id: string) =>
     apiFetch<ValidateCredentialsResponse>(`/connectors/${id}/validate`, { method: "POST" }),
 };
+
+// ── OAuth helpers ─────────────────────────────────────────────────────────────
+
+export const oauthApi = {
+  authorizeUrl: (type: ConnectorType) => `${API_URL}/oauth/${type}/authorize`,
+};

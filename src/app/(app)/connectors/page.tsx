@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { connectorsApi, type Connector, type ConnectorType, type SyncStatus } from "@/lib/api";
+import { connectorsApi, oauthApi, type Connector, type ConnectorType, type SyncStatus } from "@/lib/api";
 import ConnectorFormModal from "@/components/app/ConnectorFormModal";
 
 const fadeUp = {
@@ -101,6 +101,8 @@ export default function ConnectorsPage() {
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});
+  const [oauthConnecting, setOauthConnecting] = useState<ConnectorType | null>(null);
+  const [oauthError, setOauthError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Connector | null>(null);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -138,6 +140,37 @@ export default function ConnectorsPage() {
     }
   };
 
+  const handleOAuthConnect = (type: ConnectorType) => {
+    setOauthError(null);
+    setOauthConnecting(type);
+
+    const url = oauthApi.authorizeUrl(type);
+    const popup = window.open(url, `oauth_${type}`, "width=600,height=720,scrollbars=yes,resizable=yes");
+
+    const handler = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type === "oauth_success") {
+        window.removeEventListener("message", handler);
+        setOauthConnecting(null);
+        fetchConnectors();
+      } else if (event.data?.type === "oauth_error") {
+        window.removeEventListener("message", handler);
+        setOauthConnecting(null);
+        setOauthError(event.data.message || "OAuth connection failed.");
+      }
+    };
+    window.addEventListener("message", handler);
+
+    // If user closes popup without completing
+    const poll = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(poll);
+        window.removeEventListener("message", handler);
+        setOauthConnecting(null);
+      }
+    }, 500);
+  };
+
   const handleSaved = (connector: Connector) => {
     setConnectors((prev) => {
       const idx = prev.findIndex((c) => c.id === connector.id);
@@ -167,8 +200,50 @@ export default function ConnectorsPage() {
         </button>
       </motion.div>
 
-      {/* Content */}
+      {/* Quick Connect */}
       <motion.div custom={1} variants={fadeUp} initial="hidden" animate="visible">
+        <div className="rounded-2xl border border-border bg-surface/50 p-5">
+          <p className="text-sm font-semibold text-text-primary">Quick Connect</p>
+          <p className="mt-0.5 text-xs text-text-muted">Connect your existing logged-in account with one click</p>
+          {oauthError && (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mt-0.5 h-3.5 w-3.5 shrink-0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              {oauthError}
+            </div>
+          )}
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {(["jira", "clickup", "timedoctor"] as ConnectorType[]).map((type) => {
+              const labels = { jira: "Jira", clickup: "ClickUp", timedoctor: "Time Doctor" };
+              const isConnecting = oauthConnecting === type;
+              return (
+                <button
+                  key={type}
+                  onClick={() => handleOAuthConnect(type)}
+                  disabled={oauthConnecting !== null}
+                  className="group flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-left transition-colors hover:border-border-light hover:bg-surface-light disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${TYPE_COLORS[type]}`}>
+                    {isConnecting ? (
+                      <svg className="h-4 w-4 animate-spin text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" strokeLinecap="round" /></svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-white"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-text-primary">
+                      {isConnecting ? "Connecting…" : `Connect ${labels[type]}`}
+                    </p>
+                    <p className="text-[10px] text-text-muted">Use your logged-in account</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Content */}
+      <motion.div custom={2} variants={fadeUp} initial="hidden" animate="visible">
         {loading ? <LoadingSkeleton /> : connectors.length === 0 ? (
           /* Empty state */
           <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-surface/30 py-20 text-center">
