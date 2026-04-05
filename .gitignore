@@ -1,8 +1,6 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
+# ── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -10,35 +8,64 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
+# ── Next.js build output ──────────────────────────────────────────────────────
+.next/
+out/
+build/
+dist/
 
-# next.js
-/.next/
-/out/
+# ── Testing ───────────────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
 
-# production
-/build
+# ── Environment variables ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
 
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
-.vercel
-
-# typescript
+# ── TypeScript ────────────────────────────────────────────────────────────────
 *.tsbuildinfo
 next-env.d.ts
 
-# demo data
-/demo-data
+# ── Debug logs ────────────────────────────────────────────────────────────────
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# ── OS files ──────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+
+# ── IDE & editors ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ── Certificates & secrets ────────────────────────────────────────────────────
+*.pem
+*.key
+*.cert
+
+# ── Deployment ────────────────────────────────────────────────────────────────
+.vercel
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+.claude/
+demo-data/
